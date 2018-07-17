@@ -306,10 +306,11 @@ class DataProcessor(object):
             pos_tags = []
             # Expects each token to be a "_" separated combination of word and POS tag.
             for word_tag in tagged_sentence.split(" "):
-                word, tag = word_tag.split("_")
+                word = word_tag
+#vj                word, tag = word_tag.split("_")
                 word = word.lower()
                 words.append(word)
-                pos_tags.append(tag)
+#vj                pos_tags.append(tag)
             sentlen = len(words)
             if sentlen > maxsentlen:
                 maxsentlen = sentlen
