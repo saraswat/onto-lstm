@@ -7,19 +7,19 @@ from keras.layers import LSTM, Dense
 
 def TF_PRINT(x, s, expected_shape=None, first_n=1):
     x = tf.convert_to_tensor(x)
-    return tf.Print(x, [tf.shape(x)] if expected_shape==None else [tf.shape(x), expected_shape, tf.shape(x) == expected_shape],
+    return tf.Print(x, [tf.shape(x)] if expected_shape==None else [tf.shape(x),
+                                                                   expected_shape
+#                                                                   ,tf.equal(tf.shape(x),expected_shape)
+                                                                  ,tf.reduce_prod(tf.cast(tf.equal(tf.shape(x),expected_shape),tf.int32))
+                                                                   ],
                     "vj Golden: " + s, first_n=first_n)
-    
-BATCH = 4
-LENGTH = 11
-DIM = 100
 
 class NSE(Layer):
     '''
     Simple Neural Semantic Encoder.
     '''
     def __init__(self, output_dim, input_length=None, composer_activation='linear',
-                 return_mode='last_output', weights=None, **kwargs):
+                 return_mode='last_output', batch=None, weights=None, **kwargs):
         '''
         Arguments:
         output_dim (int)
@@ -34,10 +34,13 @@ class NSE(Layer):
         weights (list): Initial weights
         '''
         self.output_dim = output_dim
+        self.B = batch
+        self.K = output_dim if output_dim != None else -1
         self.input_dim = output_dim  # Equation 2 in the paper makes this assumption.
         self.initial_weights = weights
         self.input_spec = [InputSpec(ndim=3)]
         self.input_length = input_length
+        self.L = input_length if input_length != None else -1
         self.composer_activation = composer_activation
         super(NSE, self).__init__(**kwargs)
         self.reader = LSTM(self.output_dim, dropout_W=0.0, dropout_U=0.0, consume_less="gpu",
@@ -56,6 +59,7 @@ class NSE(Layer):
 
     def get_output_shape_for(self, input_shape):
         input_length = input_shape[1]
+        self.input_length = input_length
         if self.return_mode == "last_output": 
             return (input_shape[0], self.output_dim)
         elif self.return_mode == "all_outputs":
@@ -124,26 +128,26 @@ class NSE(Layer):
         flattened_mem_0 = K.batch_flatten(mem_0)
         flattened_mem_0 = TF_PRINT(flattened_mem_0, 
                                    "get_initial_states.flattened_mem_0",
-                                   expected_shape = [BATCH, LENGTH*DIM])        
+                                   expected_shape = [self.B, self.L*self.K])        
         initial_states = self.reader.get_initial_states(nse_input)
 
         initial_states += [flattened_mem_0]
         
         return initial_states
 
-    @staticmethod
-    def summarize_memory(o_t, mem_tm1):
+#    @staticmethod
+    def summarize_memory(self, o_t, mem_tm1):
         '''
         This method selects the relevant parts of the memory given the read output and summarizes the
         memory. Implements Equations 2-3 or 8-11 in the paper.
         '''
         # Selecting relevant memory slots, Equation 2
         z_t = K.softmax(K.sum(K.expand_dims(o_t, dim=1) * mem_tm1, axis=2))  # (batch_size, input_length)
-        z_t = TF_PRINT(z_t, "summarize_memory.z_t", expected_shape = [BATCH, LENGTH])
+        z_t = TF_PRINT(z_t, "summarize_memory.z_t", expected_shape = [self.B, self.L])
         
         # Summarizing memory, Equation 3
         m_rt = K.sum(K.expand_dims(z_t, dim=2) * mem_tm1, axis=1)  # (batch_size, output_dim)
-        m_rt = TF_PRINT(m_rt, "summarize_memory.m_rt", expected_shape = [BATCH, DIM])
+        m_rt = TF_PRINT(m_rt, "summarize_memory.m_rt", expected_shape = [self.B, self.K])
         return z_t, m_rt
 
     def compose_memory_and_output(self, output_memory_list):
@@ -153,7 +157,7 @@ class NSE(Layer):
         '''
         # Composition, Equation 4
         c_t = self.composer.call(K.concatenate(output_memory_list))  # (batch_size, output_dim)
-        c_t = TF_PRINT(c_t, "compose_memory_and_output.c_t", expected_shape = [BATCH, DIM])        
+        c_t = TF_PRINT(c_t, "compose_memory_and_output.c_t", expected_shape = [self.B, self.K*len(output_memory_list)])        
         return c_t
 
     def update_memory(self, z_t, h_t, mem_tm1):
@@ -186,7 +190,7 @@ class NSE(Layer):
         # Updating memory. First term in summation corresponds to selective forgetting and the second term to
         # selective addition. Equation 6.
         mem_t = mem_tm1 * (1 - tiled_z_t) + tiled_h_t * tiled_z_t  # (batch_size, input_length, output_dim)
-        mem_t = TF_PRINT(mem_t, "update_memory.mem_t", expected_shape=[BATCH, LENGTH, DIM])
+        mem_t = TF_PRINT(mem_t, "update_memory.mem_t", expected_shape=[self.B, self.L, self.K])
         
         return mem_t
 
@@ -194,7 +198,8 @@ class NSE(Layer):
     def split_states(states):
         # This method is a helper for the step function to split the states into reader states, memory and
         # awrite states.
-        return states[:2], states[2], states[3:]
+        # increase by 1 because we add ht to the output states of step.
+        return states[:3], states[3], states[4:]
 
     def step(self, input_t, states):
         '''
@@ -202,6 +207,10 @@ class NSE(Layer):
         a new output vector (Equations 1 to 6 in the paper).
         The memory_state is flattened because K.rnn requires all states to be of the same shape as the output,
         because it uses the same mask for the output and the states.
+
+        vj: Note that all three elements of states returned below have the same *shape*, though
+        flattened_mem_tm1 has different value for the second dimension.
+     
         Inputs:
             input_t (batch_size, input_dim)
             states (list[Tensor])
@@ -213,21 +222,20 @@ class NSE(Layer):
             h_t (batch_size, output_dim)
             flattened_mem_t (batch_size, input_length * output_dim)
         '''
-        input_t = TF_PRINT(input_t, "step.input_t", expected_shape=[BATCH, DIM])
+        input_t = TF_PRINT(input_t, "step.input_t", expected_shape=[self.B, self.K])
         
         reader_states, flattened_mem_tm1, writer_states = self.split_states(states)
         input_mem_shape = K.shape(flattened_mem_tm1)
         mem_tm1_shape = (input_mem_shape[0], input_mem_shape[1]/self.output_dim, self.output_dim)
-
         mem_tm1 = K.reshape(flattened_mem_tm1, mem_tm1_shape)  # (batch_size, input_length, output_dim)
-        mem_tm1 = TF_PRINT(mem_tm1, "step.mem_tm1", expected_shape=[BATCH, LENGTH, DIM])
+        mem_tm1 = TF_PRINT(mem_tm1, "step.mem_tm1", expected_shape=[self.B, self.L, self.K])
         
         reader_constants = self.reader.get_constants(input_t)  # Does not depend on input_t, see init.
         reader_states = reader_states[:2] + tuple(reader_constants) + reader_states[2:]
         o_t, [_, reader_c_t] = self.reader.step(input_t, reader_states)  # o_t, reader_c_t: (batch_size, output_dim)
 
-        o_t = TF_PRINT(o_t, "step.o_t", expected_shape=[BATCH, DIM])
-        reader_c_t = TF_PRINT(reader_c_t, "step.reader_c_t", expected_shape=[BATCH, DIM])
+        o_t = TF_PRINT(o_t, "step.o_t", expected_shape=[self.B, self.K])
+        reader_c_t = TF_PRINT(reader_c_t, "step.reader_c_t", expected_shape=[self.B, self.K])
         
         z_t, m_rt = self.summarize_memory(o_t, mem_tm1)
         c_t = self.compose_memory_and_output([o_t, m_rt])
@@ -240,15 +248,23 @@ class NSE(Layer):
         # Making a call to writer's step function, Equation 5
         h_t, [_, writer_c_t] = self.writer.step(c_t, writer_states)  # h_t, writer_c_t: (batch_size, output_dim)
 
-        h_t = TF_PRINT(h_t, "step.h_t", expected_shape=[BATCH, DIM])
-        writer_c_t = TF_PRINT(writer_c_t, "step.writer_c_t", expected_shape=[BATCH, DIM])
+        h_t = TF_PRINT(h_t, "step.h_t", expected_shape=[self.B, self.K])
+        writer_c_t = TF_PRINT(writer_c_t, "step.writer_c_t", expected_shape=[self.B, self.K])
 
         mem_t = self.update_memory(z_t, h_t, mem_tm1)
         
         flattened_mem_t = K.batch_flatten(mem_t)
-        flattened_mem_t = TF_PRINT(flattened_mem_t, "step.flattened_mem_t", expected_shape=[BATCH, LENGTH*DIM])
+        flattened_mem_t = TF_PRINT(flattened_mem_t, "step.flattened_mem_t", expected_shape=[self.B, self.L*self.K])
 
-        return h_t, [o_t, reader_c_t, flattened_mem_t, h_t, writer_c_t]
+
+        # vj TODO: The first state returned at time t should be the value of the output at time t-1.
+        # so that shouldbe h_(t-1). Where do we get this from?
+        # Need to fix the initial state to have the same shape as well.
+        # For now, pass h_t.
+
+        print("vj step: return state: {}".format([h_t, o_t, reader_c_t, flattened_mem_t, h_t, writer_c_t]))
+        
+        return h_t, [h_t, o_t, reader_c_t, flattened_mem_t, h_t, writer_c_t]
 
     def loop(self, x, initial_states, mask):
         # This is a separate method because Ontoaware variants will have to override this to make a call
@@ -262,13 +278,17 @@ class NSE(Layer):
 
     def call(self, x, mask=None):
         # input_shape = (batch_size, input_length, input_dim). This needs to be defined in build.
-        if mask != None:
-            print("vj golden call.mask ={}. Being set to None.".format(mask))
-            mask=None
+        #if mask != None:
+        #    print("vj golden call.mask ={}. Being set to None.".format(mask))
+        #    mask=None
         initial_read_states = self.get_initial_states(x, mask)
+        #vj duplicate the first guy.
+        initial_read_states = [initial_read_states[0]] + initial_read_states
 
+        print("vj call: initial_read_states: {}".format(initial_read_states))
+        
         fake_writer_input = K.expand_dims(initial_read_states[0], dim=1)  # (batch_size, 1, output_dim)
-        fake_writer_input = TF_PRINT(fake_writer_input, "call.fake_writer_input", expected_shape=[BATCH, 1, DIM])
+        fake_writer_input = TF_PRINT(fake_writer_input, "call.fake_writer_input", expected_shape=[self.B, 1, self.K])
         
         initial_write_states = self.writer.get_initial_states(fake_writer_input)  # h_0 and c_0 of the writer LSTM
         initial_states = initial_read_states + initial_write_states
@@ -290,10 +310,10 @@ class NSE(Layer):
             # return mode is output_and_memory
             expanded_last_output = K.expand_dims(last_output, dim=1)  # (batch_size, 1, output_dim)
             expanded_last_output = TF_PRINT(expanded_last_output, "call.expanded_last_output",
-                                            expected_size=[BATCH, 1, DIM])
+                                            expected_size=[self.B, 1, self.K])
             # (batch_size, 1+input_length, output_dim)
             result = K.concatenate([expanded_last_output, last_memory], axis=1)
-            result = TF_PRINT(result, "call.result", expected_size=[BATCH, 1+LENGTH, DIM])
+            result = TF_PRINT(result, "call.result", expected_size=[self.B, 1+self.L, self.K])
             return result
 
     def get_config(self):

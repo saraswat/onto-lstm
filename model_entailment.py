@@ -36,8 +36,8 @@ class EntailmentModel(object):
         self.custom_objects = None
         self.encoder_model = None
 
-    def train(self, train_inputs, train_labels, num_epochs=20, mlp_size=1024, mlp_activation='relu',
-              dropout=None, embedding_file=None, tune_embedding=True, num_mlp_layers=2,
+    def train(self, max_sent_len, train_inputs, train_labels, num_epochs=20, mlp_size=1024, mlp_activation='relu',
+              dropout=None, embedding_file=None, tune_embedding=True, num_mlp_layers=2, batch=None,
               patience=5):
         '''
         train_inputs (list(numpy_array)): The two sentence inputs
@@ -54,9 +54,10 @@ class EntailmentModel(object):
         num_label_types = train_labels.shape[1]  # train_labels is of shape (num_samples, num_label_types)
         sent1_input_layer = Input(name='sent1', shape=train_inputs[0].shape[1:], dtype='int32')
         sent2_input_layer = Input(name='sent2', shape=train_inputs[1].shape[1:], dtype='int32')
-        encoded_sent1, encoded_sent2 = self._get_encoded_sentence_variables(sent1_input_layer,
+        encoded_sent1, encoded_sent2 = self._get_encoded_sentence_variables(max_sent_len, sent1_input_layer,
                                                                             sent2_input_layer, dropout,
-                                                                            embedding_file, tune_embedding)
+                                                                            embedding_file, tune_embedding,
+                                                                            batch=32 if batch==None else batch)
         concat_sent_rep = merge([encoded_sent1, encoded_sent2], mode='concat')
         mul_sent_rep = merge([encoded_sent1, encoded_sent2], mode='mul')
         diff_sent_rep = merge([encoded_sent1, encoded_sent2], mode=lambda l: l[0]-l[1],
@@ -97,8 +98,8 @@ class EntailmentModel(object):
                     break
         self.save_best_model()
 
-    def _get_encoded_sentence_variables(self, sent1_input_layer, sent2_input_layer, dropout,
-                                        embedding_file, tune_embedding):
+    def _get_encoded_sentence_variables(self, max_sent_len, sent1_input_layer, sent2_input_layer, dropout,
+                                        embedding_file, tune_embedding, batch=None):
         if self.bidirectional:
             encoded_sent1_seq = self.encoder_model.get_encoded_phrase(sent1_input_layer, dropout=dropout,
                                                                       embedding=embedding_file)
@@ -133,10 +134,10 @@ class EntailmentModel(object):
         random.shuffle(sentences_and_labels)
         tagged_sentences, label_ind = zip(*sentences_and_labels)
         print >>sys.stderr, "Indexing training data"
-        train_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
+        max_sent_len, train_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
                                                                 for_test=False, remove_singletons=True)
         train_labels = self.data_processor.make_one_hot(label_ind)
-        return train_inputs, train_labels
+        return max_sent_len, train_inputs, train_labels
 
     def process_test_data(self, input_file, onto_aware, is_labeled=True):
         if not self.model:
@@ -158,10 +159,10 @@ class EntailmentModel(object):
         # Infer max sentence length if the model is trained
         input_shape = self.model.get_input_shape_at(0)[0]  # take the shape of the first of two inputs at 0.
         sentlenlimit = input_shape[1]  # (num_sentences, num_words, num_senses, num_hyps)
-        test_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
+        max_sent_len, test_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
                                                                sentlenlimit=sentlenlimit, for_test=True)
         test_labels = self.data_processor.make_one_hot(label_ind)
-        return test_inputs, test_labels
+        return max_sent_len, test_inputs, test_labels
 
     def test(self, inputs, targets):
         if not self.model:
@@ -339,8 +340,8 @@ class NSEEntailmentModel(EntailmentModel):
             self.custom_objects["MultipleMemoryAccessNSE"] = MultipleMemoryAccessNSE
 
     @overrides
-    def _get_encoded_sentence_variables(self, sent1_input_layer, sent2_input_layer, dropout,
-                                        embedding_file, tune_embedding):
+    def _get_encoded_sentence_variables(self, max_sent_len, sent1_input_layer, sent2_input_layer, dropout,
+                                        embedding_file, tune_embedding, batch=None):
         if embedding_file is None:
             if not tune_embedding:
                 print >>sys.stderr, "Pretrained embedding is not given. Setting tune_embedding to True."
@@ -358,7 +359,9 @@ class NSEEntailmentModel(EntailmentModel):
             embedded_sent1 = Dropout(dropout["embedding"])(embedded_sent1)
             embedded_sent2 = Dropout(dropout["embedding"])(embedded_sent2)
         if self.shared_memory:
-            encoder = MultipleMemoryAccessNSE(output_dim=self.embed_dim, return_mode="output_and_memory",
+            encoder = MultipleMemoryAccessNSE(output_dim=self.embed_dim,
+                                              return_mode="output_and_memory",
+                                              input_length=max_sent_len, batch=batch,
                                               name="encoder")
             mmanse_sent1_input = InputMemoryMerger(name="merge_sent1_input")([embedded_sent1, embedded_sent2])
             encoded_sent1_and_memory = encoder(mmanse_sent1_input)
@@ -369,7 +372,7 @@ class NSEEntailmentModel(EntailmentModel):
             encoded_sent2 = OutputSplitter("output", name="get_sent2_output")(encoded_sent2_and_memory)
         else:
 
-            encoder = NSE(output_dim=self.embed_dim, name="vj_encoder")
+            encoder = NSE(output_dim=self.embed_dim, name="vj_encoder", input_length=max_sent_len, batch=batch)
             encoded_sent1 = encoder(embedded_sent1)
 
             encoded_sent2 = encoder(embedded_sent2)
@@ -455,25 +458,26 @@ def main():
     if args.train_file is None:
         entailment_model.load_model(args.load_model_from_epoch)
     else:
-        train_inputs, train_labels = entailment_model.process_train_data(args.train_file, onto_aware=args.onto_aware)
+        max_sent_len, train_inputs, train_labels = entailment_model.process_train_data(args.train_file, onto_aware=args.onto_aware)
+
         dropout = {"embedding": args.embedding_dropout,
                    "encoder": args.encoder_dropout,
                    "output": args.output_dropout}
         if args.onto_aware:
-            entailment_model.train(train_inputs, train_labels, num_epochs=args.num_epochs,
+            entailment_model.train(max_sent_len, train_inputs, train_labels, num_epochs=args.num_epochs,
                                    mlp_size=args.mlp_size, mlp_activation=args.mlp_activation,
                                    dropout=dropout, num_mlp_layers=args.num_mlp_layers,
                                    embedding_file=args.embedding_file, tune_embedding=args.tune_embedding)
         else:
             # Same as above, except no attention.
-            entailment_model.train(train_inputs, train_labels, num_epochs=args.num_epochs,
+            entailment_model.train(max_sent_len, train_inputs, train_labels, num_epochs=args.num_epochs,
                                    mlp_size=args.mlp_size, mlp_activation=args.mlp_activation,
                                    dropout=dropout, num_mlp_layers=args.num_mlp_layers,
                                    embedding_file=args.embedding_file, tune_embedding=args.tune_embedding)
     
     ## Test model
     if args.test_file is not None:
-        test_inputs, test_labels = entailment_model.process_test_data(args.test_file, onto_aware=args.onto_aware)
+        _, test_inputs, test_labels = entailment_model.process_test_data(args.test_file, onto_aware=args.onto_aware)
         test_predictions = entailment_model.test(test_inputs, test_labels)
         if args.attention_output is not None:
             entailment_model.print_attention_values(args.test_file, test_inputs, args.attention_output)

@@ -293,7 +293,7 @@ class DataProcessor(object):
         second_sentence_input = self.prepare_input(second_sentences, sentlenlimit=sentlenlimit, onto_aware=onto_aware, 
                 for_test=for_test, remove_singletons=remove_singletons)
         # Returning a list to let Keras directly process it.
-        return [first_sentence_input, second_sentence_input]
+        return sentlenlimit, [first_sentence_input, second_sentence_input]
 
     def read_sentences(self, tagged_sentences):
         # Preprocessing: Separate sentences, and output different arrays for words and tags.
