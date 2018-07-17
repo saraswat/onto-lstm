@@ -1,0 +1,75 @@
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
+neutral	A person on a horse jumps over a broken down airplane. ||| A person is training his horse for a competition.
+contradiction	A person on a horse jumps over a broken down airplane. ||| A person is at a diner, ordering an omelette.
+entailment	A person on a horse jumps over a broken down airplane. ||| A person is outdoors, on a horse.
+neutral	Children smiling and waving at camera ||| They are smiling at their parents
+entailment	Children smiling and waving at camera ||| There are children present
