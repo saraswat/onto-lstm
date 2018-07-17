@@ -299,3 +299,4 @@ class MultipleMemoryAccessOntoNSE(MultipleMemoryAccessNSE):
     #@overrides
     def get_initial_states(self, onto_nse_input, input_mask=None):
         pass
+

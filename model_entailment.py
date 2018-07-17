@@ -5,6 +5,7 @@ import random
 import codecs
 import numpy
 from overrides import overrides
+import tensorflow as tf
 
 from keras.models import Model, load_model
 from keras.layers import Dense, Dropout, Embedding, Input, merge
@@ -15,6 +16,7 @@ from pooling import AveragePooling, IntraAttention
 from index_data import DataProcessor
 from onto_attention import OntoAttentionLSTM, OntoAttentionNSE
 from nse import NSE, MultipleMemoryAccessNSE, InputMemoryMerger, OutputSplitter
+from keras.utils.visualize_util import plot
 
 class EntailmentModel(object):
     def __init__(self, bidirectional=False, intra_attention=False, tune_embedding=False, **kwargs):
@@ -52,6 +54,8 @@ class EntailmentModel(object):
         num_label_types = train_labels.shape[1]  # train_labels is of shape (num_samples, num_label_types)
         sent1_input_layer = Input(name='sent1', shape=train_inputs[0].shape[1:], dtype='int32')
         sent2_input_layer = Input(name='sent2', shape=train_inputs[1].shape[1:], dtype='int32')
+        print("vj: sent1_input_layer {}".format(sent1_input_layer))
+        print("vj: sent2_input_layer {}".format(sent2_input_layer))
         encoded_sent1, encoded_sent2 = self._get_encoded_sentence_variables(sent1_input_layer,
                                                                             sent2_input_layer, dropout,
                                                                             embedding_file, tune_embedding)
@@ -76,6 +80,7 @@ class EntailmentModel(object):
         self.model = model
         print >>sys.stderr, "Entailment model summary:"
         model.summary()
+        plot(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
         best_accuracy = 0.0
         num_worse_epochs = 0
         for epoch_id in range(num_epochs):
@@ -132,6 +137,7 @@ class EntailmentModel(object):
         print >>sys.stderr, "Indexing training data"
         train_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
                                                                 for_test=False, remove_singletons=True)
+        print('vj: train_inputs shape:{}'.format(train_inputs))
         train_labels = self.data_processor.make_one_hot(label_ind)
         return train_inputs, train_labels
 
@@ -366,7 +372,10 @@ class NSEEntailmentModel(EntailmentModel):
             encoded_sent2 = OutputSplitter("output", name="get_sent2_output")(encoded_sent2_and_memory)
         else:
             encoder = NSE(output_dim=self.embed_dim, name="encoder")
+            print("vj: NSEEntailmentModel _get_encoded_sentence_variables encoder {}".format(encoder))
             encoded_sent1 = encoder(embedded_sent1)
+            print("vj: NSEEntailmentModel _get_encoded_sentence_variables encoded_sent1 {}".format(encoded_sent1))
+
             encoded_sent2 = encoder(embedded_sent2)
         if "encoder" in dropout:
             encoded_sent1 = Dropout(dropout["encoder"])(encoded_sent1)
@@ -418,6 +427,7 @@ def main():
     argparser.add_argument('--encoder_dropout', type=float, help="Dropout after encoder", default=0.0)
     argparser.add_argument('--output_dropout', type=float, help="Dropout after encoder", default=0.0)
     args = argparser.parse_args()
+    print("vj args.encoder {}".format(args.encoder))
     if args.encoder == "lstm":
         if args.onto_aware:
             entailment_model = OntoLSTMEntailmentModel(num_senses=args.num_senses, num_hyps=args.num_hyps,
@@ -445,6 +455,8 @@ def main():
                                                   shared_memory=args.nse_shared_memory,
                                                   tune_embedding=args.tune_embedding)
 
+
+    print("vj: entailment_model {}".format(entailment_model))
     ## Train model or load trained model
     if args.train_file is None:
         entailment_model.load_model(args.load_model_from_epoch)
