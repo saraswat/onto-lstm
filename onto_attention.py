@@ -1,9 +1,10 @@
 import warnings
 from overrides import overrides
 
-from keras.layers import LSTM
-from keras.engine import InputSpec
-from keras import backend as K
+from tensorflow.keras.layers import LSTM
+
+from tensorflow.layers import InputSpec
+from tensorflow.keras import backend as K
 from keras_extensions import changing_ndim_rnn, switch
 
 from nse import NSE, MultipleMemoryAccessNSE
@@ -72,11 +73,11 @@ class OntoAttentionLSTM(LSTM):
             self.set_weights(initial_ontolstm_weights)
             del initial_ontolstm_weights
 
-    def get_initial_states(self, x):
+    def get_initial_state(self, x):
         # Reimplementing because ndim of x is 5. (samples, timesteps, num_senses, num_hyps, embedding_dim)
         sense_hyp_stripped_x = x[:, :, 0, 0, :-1]  # (samples, timesteps, input_dim), just like LSTM input.
         # We need the same initial states as regular LSTM
-        return super(OntoAttentionLSTM, self).get_initial_states(sense_hyp_stripped_x)
+        return super(OntoAttentionLSTM, self).get_initial_state(sense_hyp_stripped_x)
 
     def _step(self, x_onto_aware, states):
         h_tm1 = states[0]
@@ -196,7 +197,7 @@ class OntoAttentionLSTM(LSTM):
         if self.stateful:
             initial_states = self.states
         else:
-            initial_states = self.get_initial_states(x)
+            initial_states = self.get_initial_state(x)
         constants = self.get_constants(x)
         preprocessed_input = self.preprocess_input(x)
 
@@ -247,7 +248,7 @@ class OntoAttentionNSE(NSE):
         return super(OntoAttentionNSE, self).compute_mask(input, reader_mask)
 
     @overrides
-    def get_initial_states(self, onto_nse_input, input_mask=None):
+    def get_initial_state(self, onto_nse_input, input_mask=None):
         input_to_read = onto_nse_input  # (batch_size, num_words, num_senses, num_hyps, output_dim + 1)
         memory_input = input_to_read[:, :, :, :, :-1]  # (bs, words, senses, hyps, output_dim)
         if input_mask is None:
@@ -259,7 +260,7 @@ class OntoAttentionNSE(NSE):
             memory_mask = K.cast(memory_mask / (K.sum(memory_mask) + K.epsilon()), 'float32')
             mem_0 = K.sum(memory_input * memory_mask, axis=(2,3))  # (batch_size, num_words, output_dim)
         flattened_mem_0 = K.batch_flatten(mem_0)
-        initial_states = self.reader.get_initial_states(input_to_read)
+        initial_states = self.reader.get_initial_state(input_to_read)
         initial_states += [flattened_mem_0]
         return initial_states
 
@@ -297,6 +298,6 @@ class OntoAttentionNSE(NSE):
 
 class MultipleMemoryAccessOntoNSE(MultipleMemoryAccessNSE):
     #@overrides
-    def get_initial_states(self, onto_nse_input, input_mask=None):
+    def get_initial_state(self, onto_nse_input, input_mask=None):
         pass
 

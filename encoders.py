@@ -2,7 +2,7 @@ import sys
 import numpy
 from overrides import overrides
 
-from keras.layers import Embedding, Dropout, LSTM, Bidirectional
+from tensorflow.keras.layers import Embedding, Dropout, LSTM, Bidirectional
 
 from onto_attention import OntoAttentionLSTM
 from embedding import OntoAwareEmbedding

@@ -2,9 +2,9 @@
 Layers used after RNN with return_sequence to summarize the sentence encoding.
 '''
 
-from keras.engine import Layer
-from keras import initializations
-from keras import backend as K
+from tensorflow.keras.layers import Layer
+#from keras import initializations
+from tensorflow.keras import backend as K
 
 from keras_extensions import switch
 
@@ -48,7 +48,8 @@ class IntraAttention(AveragePooling):
     '''
     def __init__(self, init='uniform', projection_dim=50, weights=None, **kwargs):
         self.intra_attention_weights = weights
-        self.init = initializations.get(init)
+#        self.init = initializations.get(init)
+        self.init = keras.initializers.lecun_uniform()
         self.projection_dim = projection_dim
         super(IntraAttention, self).__init__(**kwargs)
 

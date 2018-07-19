@@ -5,10 +5,10 @@ import random
 import codecs
 import numpy
 from overrides import overrides
-import tensorflow as tf
 
-from keras.models import Model, load_model
-from keras.layers import Dense, Dropout, Embedding, Input, merge
+import tensorflow as tf
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.layers import Dense, Dropout, Embedding, Input, concatenate, multiply, add
 
 from embedding import OntoAwareEmbedding
 from encoders import LSTMEncoder, OntoLSTMEncoder
@@ -16,7 +16,7 @@ from pooling import AveragePooling, IntraAttention
 from index_data import DataProcessor
 from onto_attention import OntoAttentionLSTM, OntoAttentionNSE
 from nse import NSE, MultipleMemoryAccessNSE, InputMemoryMerger, OutputSplitter
-from keras.utils.visualize_util import plot
+#from keras.utils.visualize_util import plot
 
 class EntailmentModel(object):
     def __init__(self, bidirectional=False, intra_attention=False, tune_embedding=False, **kwargs):
@@ -58,12 +58,12 @@ class EntailmentModel(object):
                                                                             sent2_input_layer, dropout,
                                                                             embedding_file, tune_embedding,
                                                                             batch=32 if batch==None else batch)
-        concat_sent_rep = merge([encoded_sent1, encoded_sent2], mode='concat')
-        mul_sent_rep = merge([encoded_sent1, encoded_sent2], mode='mul')
-        diff_sent_rep = merge([encoded_sent1, encoded_sent2], mode=lambda l: l[0]-l[1],
-                              output_shape=lambda l: l[0])
+        concat_sent_rep = concatenate([encoded_sent1, encoded_sent2])
+        mul_sent_rep = multiply([encoded_sent1, encoded_sent2])
+        diff_sent_rep = add([encoded_sent1, -encoded_sent2])
+
         # Use heuristic from Mou et al. (2015) to get final merged representation
-        merged_sent_rep = merge([concat_sent_rep, mul_sent_rep, diff_sent_rep], mode='concat')
+        merged_sent_rep = concatenate([concat_sent_rep, mul_sent_rep, diff_sent_rep])
         current_projection = merged_sent_rep
         for i in range(num_mlp_layers):
             mlp_layer_i = Dense(output_dim=mlp_size, activation=mlp_activation,
@@ -77,13 +77,13 @@ class EntailmentModel(object):
         model = Model(input=[sent1_input_layer, sent2_input_layer], output=label_probs)
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
         self.model = model
-        print >>sys.stderr, "Entailment model summary:"
+        print("Entailment model summary:", file=sys.stderr)
         model.summary()
-        plot(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
+#        plot(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
         best_accuracy = 0.0
         num_worse_epochs = 0
         for epoch_id in range(num_epochs):
-            print >>sys.stderr, "Epoch: %d" % epoch_id
+            print("Epoch: {}".format(epoch_id), file=sys.stderr)
             history = model.fit(train_inputs, train_labels, validation_split=0.1, nb_epoch=1)
             validation_accuracy = history.history['val_acc'][0]  # history['val_acc'] is a list of size nb_epoch
             if validation_accuracy > best_accuracy:
@@ -94,7 +94,7 @@ class EntailmentModel(object):
             elif validation_accuracy < best_accuracy:
                 num_worse_epochs += 1
                 if num_worse_epochs >= patience:
-                    print >>sys.stderr, "Stopping training."
+                    print("Stopping training.", file=sys.stderr)
                     break
         self.save_best_model()
 
@@ -119,7 +119,7 @@ class EntailmentModel(object):
         return encoded_sent1, encoded_sent2
 
     def process_train_data(self, input_file, onto_aware):
-        print >>sys.stderr, "Reading training data"
+        print("Reading training data", file=sys.stderr)
         label_ind = []
         tagged_sentences = []
         for line in open(input_file):
@@ -130,10 +130,10 @@ class EntailmentModel(object):
             label_ind.append(self.label_map[label])
             tagged_sentences.append(tagged_sentence)
         # Shuffling so that when Keras does validation split, it is not always at the end.
-        sentences_and_labels = zip(tagged_sentences, label_ind)
+        sentences_and_labels =list(zip(tagged_sentences, label_ind))
         random.shuffle(sentences_and_labels)
         tagged_sentences, label_ind = zip(*sentences_and_labels)
-        print >>sys.stderr, "Indexing training data"
+        print("Indexing training data", file=sys.stderr)
         max_sent_len, train_inputs = self.data_processor.prepare_paired_input(tagged_sentences, onto_aware=onto_aware,
                                                                 for_test=False, remove_singletons=True)
         train_labels = self.data_processor.make_one_hot(label_ind)
@@ -141,8 +141,8 @@ class EntailmentModel(object):
 
     def process_test_data(self, input_file, onto_aware, is_labeled=True):
         if not self.model:
-            raise RuntimeError, "Model not trained yet!"
-        print >>sys.stderr, "Reading test data"
+            raise RuntimeError("Model not trained yet!")
+        print("Reading test data", file=sys.stderr)
         label_ind = []
         tagged_sentences = []
         for line in open(input_file):
@@ -155,7 +155,7 @@ class EntailmentModel(object):
             else:
                 tagged_sentence = lnstrp
             tagged_sentences.append(tagged_sentence)
-        print >>sys.stderr, "Indexing test data"
+        print("Indexing test data", file=sys.stderr)
         # Infer max sentence length if the model is trained
         input_shape = self.model.get_input_shape_at(0)[0]  # take the shape of the first of two inputs at 0.
         sentlenlimit = input_shape[1]  # (num_sentences, num_words, num_senses, num_hyps)
@@ -166,9 +166,9 @@ class EntailmentModel(object):
 
     def test(self, inputs, targets):
         if not self.model:
-            raise RuntimeError, "Model not trained!"
+            raise RuntimeError("Model not trained!")
         metrics = self.model.evaluate(inputs, targets)
-        print >>sys.stderr, "Test accuracy: %.4f" % (metrics[1])  # The first metric is loss.
+        print("Test accuracy: %.4f".format(metrics[1]), file=sys.stderr)  # The first metric is loss.
         predictions = numpy.argmax(self.model.predict(inputs), axis=1)
         rev_label_map = {ind: label for label, ind in self.label_map.items()}
         predicted_labels = [rev_label_map[pred] for pred in predictions]
@@ -286,7 +286,7 @@ class OntoLSTMEntailmentModel(EntailmentModel):
     def define_attention_model(self):
         # Take necessary parts out of the entailment model to get OntoLSTM attention.
         if not self.model:
-            raise RuntimeError, "Model not trained yet!"
+            raise RuntimeError("Model not trained yet!")
         # We need just one input to get attention. input_shape_at(0) gives a list with two shapes.
         input_shape = self.model.get_input_shape_at(0)[0]
         input_layer = Input(input_shape[1:], dtype='int32')  # removing batch size
@@ -304,7 +304,7 @@ class OntoLSTMEntailmentModel(EntailmentModel):
                                                   return_attention=True, return_sequences=True,
                                                   weights=layer.get_weights())
         if not embedding_layer or not encoder_layer:
-            raise RuntimeError, "Required layers not found!"
+            raise RuntimeError("Required layers not found!")
         attention_output = encoder_layer(embedding_layer(input_layer))
         self.attention_model = Model(input=input_layer, output=attention_output)
         self.attention_model.compile(loss="mse", optimizer="sgd")  # Loss and optimizer do not matter!
@@ -316,17 +316,17 @@ class OntoLSTMEntailmentModel(EntailmentModel):
         tagged_sentences = [x.strip().split("\t")[1] for x in codecs.open(input_file).readlines()]
         outfile = codecs.open(output_file, "w", "utf-8")
         for sent1_attention, sent2_attention, tagged_sentence in zip(sent1_attention_outputs, sent2_attention_outputs, tagged_sentences):
-            print >>outfile, tagged_sentence
-            print >>outfile, "Sentence 1:"
+            print(tagged_sentence, file=outfile)
+            print("Sentence 1:", file=outfile)
             for word_attention in sent1_attention:
                 for sense_attention in word_attention:
-                    print >>outfile, " ".join(["%s:%f" % (hyp, hyp_att) for hyp, hyp_att in sense_attention])
-                print >>outfile
-            print >>outfile, "\nSentence 2:"
+                    print(" ".join(["%s:%f" % (hyp, hyp_att) for hyp, hyp_att in sense_attention], file=outfile))
+                print("", file=outfile)
+                print("\nSentence 2:", file=outfile)
             for word_attention in sent2_attention:
                 for sense_attention in word_attention:
-                    print >>outfile, " ".join(["%s:%f" % (hyp, hyp_att) for hyp, hyp_att in sense_attention])
-                print >>outfile
+                    print(" ".join(["%s:%f" % (hyp, hyp_att) for hyp, hyp_att in sense_attention]), file=outfile)
+                print("", file=outfile)
         outfile.close()
 
 
@@ -344,7 +344,7 @@ class NSEEntailmentModel(EntailmentModel):
                                         embedding_file, tune_embedding, batch=None):
         if embedding_file is None:
             if not tune_embedding:
-                print >>sys.stderr, "Pretrained embedding is not given. Setting tune_embedding to True."
+                print("Pretrained embedding is not given. Setting tune_embedding to True.", file=sys.stderr)
                 tune_embedding = True
             embedding = None
         else:
@@ -393,7 +393,7 @@ class OntoNSEEntailmentModel(OntoLSTMEntailmentModel):
 
     def get_encoder(self, bidirectional=False):
         if bidirectional:
-            raise NotImplementedError, "Bidirectional NSE not implemented yet. But do you really want it?"
+            raise NotImplementedError("Bidirectional NSE not implemented yet. But do you really want it?")
         encoder = OntoAttentionNSE(self.num_senses, self.num_hyps, use_attention=self.use_attention,
                                    return_attention=False, output_dim=self.embed_dim, name="onto_nse")
         return encoder
@@ -443,7 +443,7 @@ def main():
     else:
         if args.onto_aware:
             if args.nse_shared_memory:
-                raise NotImplementedError, "OntoMMANSEEntailmentModel coming soon"
+                raise NotImplementedError("OntoMMANSEEntailmentModel coming soon")
             entailment_model = OntoNSEEntailmentModel(num_senses=args.num_senses, num_hyps=args.num_hyps,
                                                       use_attention=args.use_attention,
                                                       set_sense_priors=args.set_sense_priors,

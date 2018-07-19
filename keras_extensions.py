@@ -1,5 +1,5 @@
 from __future__ import absolute_import
-from keras import backend as K
+from tensorflow.keras import backend as K
 
 
 def changing_ndim_rnn(step_function, inputs, initial_states,

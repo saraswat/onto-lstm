@@ -1,9 +1,9 @@
 import sys
 from overrides import overrides
 import tensorflow as tf
-from keras import backend as K
-from keras.engine import InputSpec, Layer
-from keras.layers import LSTM, Dense
+from tensorflow.keras import backend as K
+from tensorflow.layers import InputSpec
+from tensorflow.keras.layers import Layer, LSTM, Dense
 
 def TF_PRINT(x, s, expected_shape=None, first_n=1):
     x = tf.convert_to_tensor(x)
@@ -31,7 +31,7 @@ class NSE(Layer):
             all_outputs returns the whole sequence of h_ts
             output_and_memory returns the last output and the last memory concatenated
                 (needed if this layer is followed by a MMA-NSE)
-        weights (list): Initial weights
+        weights (list): Initial weights --vj: what are these?
         '''
         self.output_dim = output_dim
         self.B = batch
@@ -43,19 +43,23 @@ class NSE(Layer):
         self.L = input_length if input_length != None else -1
         self.composer_activation = composer_activation
         super(NSE, self).__init__(**kwargs)
-        self.reader = LSTM(self.output_dim, dropout_W=0.0, dropout_U=0.0, consume_less="gpu",
+        self.reader = LSTM(self.output_dim, dropout=0.0, recurrent_dropout=0.0, 
                            name="{}_reader".format(self.name))
         # TODO: Let the writer use parameter dropout and any consume_less mode.
         # Setting dropout to 0 here to eliminate the need for constants.
         # Setting consume_less to gpu to eliminate need for preprocessing
-        self.writer = LSTM(self.output_dim, dropout_W=0.0, dropout_U=0.0, consume_less="gpu",
+        self.writer = LSTM(self.output_dim, dropout=0.0, recurrent_dropout=0.0, 
                            name="{}_writer".format(self.name))
         self.composer = Dense(self.output_dim * 2, activation=self.composer_activation,
                               name="{}_composer".format(self.name))
         if return_mode not in ["last_output", "all_outputs", "output_and_memory"]:
-            raise Exception("Unrecognized return mode: %s" % (return_mode))
+            raise Exception("Unrecognized return mode: {}".format(return_mode))
         self.return_mode = return_mode
 
+
+    def compute_output_shape(self, input_shape):
+        return self.get_output_shape_for(input_shape)
+    
     def get_output_shape_for(self, input_shape):
         input_length = input_shape[1]
         self.input_length = input_length
@@ -82,18 +86,24 @@ class NSE(Layer):
         # Takes concatenation of output and memory summary
         return (input_shape[0], self.output_dim * 2)
 
+    def get_writer_input_shape(self, input_shape):
+        return (input_shape[0], 1, self.output_dim * 2)  # Will process one timestep at a time
+    
     def get_reader_input_shape(self, input_shape):
         return input_shape
 
     def build(self, input_shape):
         self.input_spec = [InputSpec(shape=input_shape)]
         input_dim = input_shape[-1]
+
         reader_input_shape = self.get_reader_input_shape(input_shape)
-        print >>sys.stderr, "NSE reader input shape:", reader_input_shape 
-        writer_input_shape = (input_shape[0], 1, self.output_dim * 2)  # Will process one timestep at a time
-        print >>sys.stderr, "NSE writer input shape:", writer_input_shape 
+        writer_input_shape = self.get_writer_input_shape(input_shape)
         composer_input_shape = self.get_composer_input_shape(input_shape)
-        print >>sys.stderr, "NSE composer input shape:", composer_input_shape 
+
+        print("NSE writer input shape: {}".format(writer_input_shape), file=sys.stderr)        
+        print("NSE reader input shape:{}".format(reader_input_shape) , file=sys.stderr)        
+        print("NSE composer input shape: {}".format(composer_input_shape), file=sys.stderr)
+
         self.reader.build(reader_input_shape)
         self.writer.build(writer_input_shape)
         self.composer.build(composer_input_shape)
@@ -102,13 +112,23 @@ class NSE(Layer):
         reader_weights = self.reader.trainable_weights
         writer_weights = self.writer.trainable_weights
         composer_weights = self.composer.trainable_weights
-        self.trainable_weights = reader_weights + writer_weights + composer_weights
+
+        #vj: Keras 2.2 -- 
+        # (a) There are no trainable weights specific to this layer -- only those in reader, writer, composer
+        #     (though ... what are initial_weights?)
+        # (b) The compute graph built up in call should already know about r, w, c, and its weights.
+        # So I believe nothing needs to be done here -- but not sure about this.
+        # (Why did Keras 1.2 require trainable_weights to be set?)
+ #       self.trainable_weights = reader_weights + writer_weights + composer_weights
 
         if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
+            # self.set_weights(self.initial_weights)
+            # vj Keras 2.2 conversion. Guessing the shape argument below.
+            self.weights = self.add_weight(name='nse', shape=self.initial_weights.get_shape(), trainable=True)
             del self.initial_weights
+        super(NSE, self).build(input_shape) 
 
-    def get_initial_states(self, nse_input, input_mask=None):
+    def get_initial_state(self, nse_input, input_mask=None):
         '''
         This method produces the 'read' mask for all timesteps
         and initializes the memory slot mem_0.
@@ -128,23 +148,22 @@ class NSE(Layer):
         mem_0 = input_to_read
 
 
-        flattened_mem_0 = tf.unpack(mem_0, axis=1)
-        initial_states = self.reader.get_initial_states(nse_input)
+        flattened_mem_0 = flatten_memory(mem_0)
+        initial_states = self.reader.get_initial_state(nse_input)
         initial_states += flattened_mem_0
         return initial_states
 
-#    @staticmethod
     def summarize_memory(self, o_t, mem_tm1):
         '''
         This method selects the relevant parts of the memory given the read output and summarizes the
         memory. Implements Equations 2-3 or 8-11 in the paper.
         '''
         # Selecting relevant memory slots, Equation 2
-        z_t = K.softmax(K.sum(K.expand_dims(o_t, dim=1) * mem_tm1, axis=2), name="z_t")  # (batch_size, input_length)
+        z_t = K.softmax(K.sum(K.expand_dims(o_t, axis=1) * mem_tm1, axis=2)) 
         z_t = TF_PRINT(z_t, "z_t", expected_shape = [self.B, self.L])
         
         # Summarizing memory, Equation 3
-        m_rt = K.sum(K.expand_dims(z_t, dim=2) * mem_tm1, axis=1, name="m_rt")  # (batch_size, output_dim)
+        m_rt = K.sum(K.expand_dims(z_t, axis=2) * mem_tm1, axis=1)  
         m_rt = TF_PRINT(m_rt, "m_rt", expected_shape = [self.B, self.K])
         return z_t, m_rt
 
@@ -154,14 +173,14 @@ class NSE(Layer):
         Implements equation 4 or 12 in the paper.
         '''
         # Composition, Equation 4
-        c_t = self.composer.call(K.concatenate(output_memory_list))  # (batch_size, output_dim)
+        c_t = self.composer.call(K.concatenate(output_memory_list)) 
         c_t = TF_PRINT(c_t, "c_t", expected_shape = [self.B, self.K*len(output_memory_list)])        
         return c_t
 
     def update_memory(self, z_t, h_t, mem_tm1):
         '''
-        This method takes the attention vector (z_t), writer output (h_t) and previous timestep's memory (mem_tm1)
-        and updates the memory. Implements equations 6, 14 or 15.
+        This method takes the attention vector (z_t), writer output (h_t) and previous timestep's memory 
+        (mem_tm1) and updates the memory. Implements equations 6, 14 or 15.
         '''
         """ 
         The following is written assuming the equations in the paper are implemented as they are written:
@@ -187,7 +206,7 @@ class NSE(Layer):
 
         # Updating memory. First term in summation corresponds to selective forgetting and the second term to
         # selective addition. Equation 6.
-        mem_t = mem_tm1 * (1 - tiled_z_t) + tiled_h_t * tiled_z_t  # (batch_size, input_length, output_dim)
+        mem_t = mem_tm1 * (1 - tiled_z_t) + tiled_h_t * tiled_z_t 
         mem_t = TF_PRINT(mem_t, "mem_t", expected_shape=[self.B, self.L, self.K])
         
         return mem_t
@@ -199,6 +218,18 @@ class NSE(Layer):
         # increase by 1 because we add ht to the output states of step.
         # Three state tensors, then memory, then two state tensors at the end
         return states[:3], states[3:-2], states[-2:]
+
+    @staticmethod
+    def composes_states(read_states, memory, write_states):
+        return read_states + memory + write_states
+    
+    @staticmethod
+    def flatten_memory(mem):
+        return tf.unstack(mem, axis=1)
+
+    @staticmethod
+    def unflatten_memory(flattened_mem):
+        return tf.stack(flattened_mem, axis=1)
 
     def step(self, input_t, states):
         '''
@@ -224,15 +255,19 @@ class NSE(Layer):
         '''
         input_t = TF_PRINT(input_t, "input_t", expected_shape=[self.B, self.K])
         
-        reader_states, flattened_mem_tm1, writer_states = self.split_states(states)
+        reader_states, flattened_mem_tm1, writer_states = split_states(states)
 
         # Reshape the memory
-        mem_tm1 = tf.pack(flattened_mem_tm1, axis=1)
+        mem_tm1 = unflatten_memory(flattened_mem_tm1) 
         mem_tm1 = TF_PRINT(mem_tm1, "mem_tm1", expected_shape=[self.B, self.L, self.K])
-        
-        reader_constants = self.reader.get_constants(input_t)  # Does not depend on input_t, see init.
-        reader_states = reader_states[:2] + tuple(reader_constants) + reader_states[2:]
-        o_t, [_, reader_c_t] = self.reader.step(input_t, reader_states)  # o_t, reader_c_t: (batch_size, output_dim)
+
+        # vj Keras 2.2
+        # Do not have get_constants any more.
+        # self.reader.get_constants(input_t)  # Does not depend on input_t, see init.
+        reader_constants = [] 
+        reader_states = reader_states[:2] + (reader_constants) + reader_states[2:]
+        # o_t, reader_c_t: (batch_size, output_dim)
+        o_t, [_, reader_c_t] = self.reader.step(input_t, reader_states)  
 
         o_t = TF_PRINT(o_t, "o_t", expected_shape=[self.B, self.K])
         reader_c_t = TF_PRINT(reader_c_t, "reader_c_t", expected_shape=[self.B, self.K])
@@ -246,25 +281,20 @@ class NSE(Layer):
         writer_states += tuple(writer_constants)
 
         # Making a call to writer's step function, Equation 5
-        h_t, [_, writer_c_t] = self.writer.step(c_t, writer_states)  # h_t, writer_c_t: (batch_size, output_dim)
+        # h_t, writer_c_t: (batch_size, output_dim)
+        h_t, [_, writer_c_t] = self.writer.step(c_t, writer_states)  
 
         h_t = TF_PRINT(h_t, "h_t", expected_shape=[self.B, self.K])
         writer_c_t = TF_PRINT(writer_c_t, "writer_c_t", expected_shape=[self.B, self.K])
 
         mem_t = self.update_memory(z_t, h_t, mem_tm1)
 
-        #vj: unpack idea
-        flattened_mem_t = tf.unpack(mem_t, axis=1)
-        # Do not add this line!! This will convert to a tensor, and we need a list.
-        #flattened_mem_t = TF_PRINT(flattened_mem_t, "flattened_mem_t", expected_shape=[self.B, self.L, self.K])
-        
-
         # vj TODO: The first state returned at time t should be the value of the output at time t-1.
         # so that shouldbe h_(t-1). Where do we get this from?
         # Need to fix the initial state to have the same shape as well.
         # For now, pass h_t.
 
-        return h_t, [h_t, o_t, reader_c_t] + flattened_mem_t + [ h_t, writer_c_t]        
+        return h_t, compose_states([h_t, o_t, reader_c_t], flatten_memory(mem_t), [ h_t, writer_c_t])
 
 
     def loop(self, x, initial_states, mask):
@@ -282,15 +312,15 @@ class NSE(Layer):
     def call(self, x, mask=None):
         # input_shape = (batch_size, input_length, input_dim). This needs to be defined in build.
         mask = TF_PRINT(mask, "mask")        
-        initial_read_states = self.get_initial_states(x, mask)
+        initial_read_states = self.get_initial_state(x, mask)
 
-        #vj duplicate the first guy.
+        #vj duplicate the first guy -- TODO: check if a stateful LSTM should be used.
         initial_read_states = [initial_read_states[0]] + initial_read_states
 
-        fake_writer_input = K.expand_dims(initial_read_states[0], dim=1)  # (batch_size, 1, output_dim)
+        fake_writer_input = K.expand_dims(initial_read_states[0], axis=1)  # (batch_size, 1, output_dim)
         fake_writer_input = TF_PRINT(fake_writer_input, "fake_writer_input", expected_shape=[self.B, 1, self.K])
         
-        initial_write_states = self.writer.get_initial_states(fake_writer_input)  # h_0 and c_0 of the writer LSTM
+        initial_write_states = self.writer.get_initial_state(fake_writer_input)  # h_0 and c_0 of the writer LSTM
         initial_states = initial_read_states + initial_write_states
 
         # last_output: (batch_size, output_dim)
@@ -308,7 +338,7 @@ class NSE(Layer):
             return all_outputs
         else:
             # return mode is output_and_memory
-            expanded_last_output = K.expand_dims(last_output, dim=1)  # (batch_size, 1, output_dim)
+            expanded_last_output = K.expand_dims(last_output, axis=1)  # (batch_size, 1, output_dim)
             expanded_last_output = TF_PRINT(expanded_last_output, "expanded_last_output",
                                             expected_size=[self.B, 1, self.K])
             # (batch_size, 1+input_length, output_dim)
@@ -332,6 +362,7 @@ class InputMemoryMerger(Layer):
     layer, and prepares a single input tensor for MMANSE that is a concatenation of the first sentence's memory
     and the second sentence's embedding.
     This is a concrete layer instead of a lambda function because we want to support masking.
+    TODO: vj Check if Keras 2.2 supports masking in Lambda layers.
     '''
     def __init__(self, **kwargs):
         self.supports_masking = True
@@ -340,6 +371,9 @@ class InputMemoryMerger(Layer):
     def get_output_shape_for(self, input_shapes):
         return (input_shapes[1][0], input_shapes[1][1]*2, input_shapes[1][2])
 
+    def compute_output_shape(self, input_shape):
+        return self.get_output_shape_for(input_shape)
+    
     def compute_mask(self, inputs, mask=None):
         # pylint: disable=unused-argument
         if mask is None:
@@ -359,6 +393,7 @@ class OutputSplitter(Layer):
     '''
     This layer takes the concatenation of output and memory from NSE and returns either the output or the
     memory.
+    TODO: CHeck if this should be a Lambda layer.
     '''
     def __init__(self, return_mode, **kwargs):
         self.supperots_masking = True
@@ -375,6 +410,9 @@ class OutputSplitter(Layer):
             # input contains output and memory concatenated along the second dimension.
             return (input_shape[0], input_shape[1] - 1, input_shape[2])
 
+    def compute_output_shape(self, input_shape):
+        return self.get_output_shape_for(input_shape)
+    
     def compute_mask(self, inputs, mask=None):
         # pylint: disable=unused-argument
         if self.return_mode == "output" or mask is None:
@@ -418,12 +456,12 @@ class MultipleMemoryAccessNSE(NSE):
         return (input_shape[0], self.output_dim * 3)
 
     @overrides
-    def get_initial_states(self, nse_input, input_mask=None):
+    def get_initial_state(self, nse_input, input_mask=None):
         '''
-        Read input in MMA-NSE will be of shape (batch_size, read_input_length*2, input_dim), a concatenation of
-        the actual input to this NSE and the output from a different NSE. The latter will be used to initialize
-        the shared memory. The former will be passed to the read LSTM and also used to initialize the current
-        memory.
+        Read input in MMA-NSE will be of shape (batch_size, read_input_length*2, input_dim), a concatenation 
+        of the actual input to this NSE and the output from a different NSE. The latter will be used to 
+        initialize the shared memory. The former will be passed to the read LSTM and also used to initialize 
+        the current memory.
         '''
         input_length = K.shape(nse_input)[1]
         read_input_length = input_length/2
@@ -431,10 +469,11 @@ class MultipleMemoryAccessNSE(NSE):
         initial_shared_memory = K.batch_flatten(nse_input[:, read_input_length:, :])
         mem_0 = K.batch_flatten(input_to_read)
         o_mask = self.reader.compute_mask(input_to_read, input_mask)
-        reader_states = self.reader.get_initial_states(nse_input)
+        reader_states = self.reader.get_initial_state(nse_input)
         initial_states = reader_states + [mem_0, initial_shared_memory]
         return initial_states, o_mask
 
+    # vj: TODO check this logic continues to work for Keras 2.2
     @overrides
     def step(self, input_t, states):
         reader_states = states[:2]
@@ -444,15 +483,17 @@ class MultipleMemoryAccessNSE(NSE):
         mem_shape = (input_mem_shape[0], input_mem_shape[1]/self.output_dim, self.output_dim)
         mem_tm1 = K.reshape(flattened_mem_tm1, mem_shape)
         shared_mem_tm1 = K.reshape(flattened_shared_mem_tm1, mem_shape)
-        reader_constants = self.reader.get_constants(input_t)
-        reader_states += reader_constants
+        reader_constants = () # self.reader.get_constants(input_t)
+        reader_states += tuple(reader_constants)
         o_t, [_, reader_c_t] = self.reader.step(input_t, reader_states)
         z_t, m_rt = self.summarize_memory(o_t, mem_tm1)
         shared_z_t, shared_m_rt = self.summarize_memory(o_t, shared_mem_tm1)
         c_t = self.compose_memory_and_output([o_t, m_rt, shared_m_rt])
+
         # Collecting the necessary variables to directly call writer's step function.
         writer_constants = self.writer.get_constants(c_t)  # returns dropouts for W and U (all 1s, see init)
         writer_states = [writer_h_tm1, writer_c_tm1] + writer_constants
+
         # Making a call to writer's step function, Equation 5
         h_t, [_, writer_c_t] = self.writer.step(c_t, writer_states)  # h_t, writer_c_t: (batch_size, output_dim)
         mem_t = self.update_memory(z_t, h_t, mem_tm1)
