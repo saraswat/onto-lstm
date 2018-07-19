@@ -1,0 +1,7 @@
+Thu Jul 19 06:44:55 EDT 2018
+
+Trying to convert to tf 1.9 and use tf.keras packages.
+
+The main issue is that Keras 2.2 does not provide a step function for LSTM.
+
+So we need to find a way around that.
